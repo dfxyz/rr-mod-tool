@@ -224,13 +224,15 @@ fn work_in_unpack_ch_pac_mode<I: Iterator<Item = String>>(mut args: I) {
 
         let src_path = dir_path.join("10");
         let dst_path = dir_path.join("10_");
-        rr_mod_tool::bpe::unpack(src_path, dst_path.clone());
+        if rr_mod_tool::bpe::detect_format(&src_path) {
+            rr_mod_tool::bpe::unpack(src_path, dst_path.clone());
 
-        let src_path = dst_path;
-        let dst_path = dir_path.join("10.d");
-        rr_mod_tool::tex::unpack(src_path.clone(), dst_path);
+            let src_path = dst_path;
+            let dst_path = dir_path.join("10.d");
+            rr_mod_tool::tex::unpack(src_path.clone(), dst_path);
 
-        remove_file(src_path).unwrap();
+            remove_file(src_path).unwrap();
+        }
     }
 }
 
@@ -269,7 +271,6 @@ fn usage() {
     println!("   or: ./rr-mod-tool -cDLC dlc_dir");
     println!("   or: ./rr-mod-tool -uCH pac_file dst_dir");
     println!("   or: ./rr-mod-tool -pCH modified_file_no... pac_file");
-    println!("   or: ./rr-mod-tool -uCH pac_file dst_dir");
     println!("   or: ./rr-mod-tool -swap file_no_prefix1 file_no_prefix2 [file_no_prefixN file_no_prefixM...]");
     println!("Available formats: tex, bpe, pach, epac.")
 }
