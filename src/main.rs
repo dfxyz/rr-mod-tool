@@ -26,9 +26,6 @@ fn main() {
         Some(s) if s == "-uCH" => {
             work_in_unpack_ch_pac_mode(args);
         }
-        Some(s) if s == "-swap" => {
-            work_in_swap_file_mode(args);
-        }
         _ => {
             usage();
             return;
@@ -236,33 +233,6 @@ fn work_in_unpack_ch_pac_mode<I: Iterator<Item = String>>(mut args: I) {
     }
 }
 
-fn work_in_swap_file_mode<I: Iterator<Item = String>>(mut args: I) {
-    loop {
-        let prefix1 = match args.next() {
-            Some(s) => s,
-            None => return,
-        };
-        let prefix2 = match args.next() {
-            Some(s) => s,
-            None => {
-                usage();
-                return;
-            }
-        };
-        if prefix1 == prefix2 {
-            continue;
-        }
-        for i in 0..4 {
-            let src = format!("{}{}", prefix1, i);
-            let tmp = src.clone() + "_";
-            let dst = format!("{}{}", prefix2, i);
-            std::fs::rename(&src, &tmp).unwrap();
-            std::fs::rename(&dst, &src).unwrap();
-            std::fs::rename(&tmp, &dst).unwrap();
-        }
-    }
-}
-
 fn usage() {
     println!("Usage: ./rr-mod-tool -p format src dst");
     println!("   or: ./rr-mod-tool -u src dst");
@@ -271,6 +241,5 @@ fn usage() {
     println!("   or: ./rr-mod-tool -cDLC dlc_dir");
     println!("   or: ./rr-mod-tool -uCH pac_file dst_dir");
     println!("   or: ./rr-mod-tool -pCH modified_file_no... pac_file");
-    println!("   or: ./rr-mod-tool -swap file_no_prefix1 file_no_prefix2 [file_no_prefixN file_no_prefixM...]");
     println!("Available formats: tex, bpe, pach, epac.")
 }
