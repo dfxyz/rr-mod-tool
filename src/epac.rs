@@ -40,7 +40,7 @@ pub fn detect_format<P: AsRef<Path>>(path: P) -> bool {
 
 pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
     let mut header_unknown_field = [0u8; 4];
-    let mut footer_unknown_field = [0u8];
+    let mut footer_unknown_field = [0u8; 4];
     let mut entry_info_list = vec![];
     {
         let file = File::open(src_path.join("__entry__")).unwrap();
@@ -59,15 +59,17 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
             let end = (i + 1) * 4;
             let mut name = [0u8; 4];
             name.clone_from_slice(&buf[start..end]);
-            if name[0] == b'E' {
-                assert!(i + 1 < len);
+            if &name[..] == [0, 0, 0, 0] {
+                assert!(i + 2 < len);
+                let mut divider_name = [0u8;4];
+                divider_name.clone_from_slice(&buf[((i + 1) * 4)..((i + 2) * 4)]);
                 let mut divider_unknown_field = [0u8; 4];
-                divider_unknown_field.clone_from_slice(&buf[((i + 1) * 4)..((i + 2) * 4)]);
+                divider_unknown_field.clone_from_slice(&buf[((i + 2) * 4)..((i + 3) * 4)]);
                 entry_info_list.push(EntryInfo::Divider(DividerInfo {
-                    name,
+                    name: divider_name,
                     divider_unknown_field,
                 }));
-                i += 2;
+                i += 3;
             } else {
                 let name = String::from_utf8_lossy(&name).to_string();
                 let path = src_path.join(name);
@@ -165,7 +167,7 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
         writer.write_all(b"\x00").unwrap();
     }
     writer.write_all(&footer_unknown_field).unwrap();
-    for _ in 1..0x400 {
+    for _ in 4..0x400 {
         writer.write_all(b"\x00").unwrap();
     }
 }
@@ -181,8 +183,8 @@ pub fn unpack(src_path: PathBuf, dst_path: PathBuf) {
     let header_unknown_field = u32::from_le_bytes(buf);
 
     reader.seek(SeekFrom::End(-0x400)).unwrap();
-    let buf = read_exact!(&mut reader, 1);
-    let footer_unknown_field = u8::from_le_bytes(buf);
+    let buf = read_exact!(&mut reader, 4);
+    let footer_unknown_field = u32::from_le_bytes(buf);
 
     reader.seek(SeekFrom::Start(0x800)).unwrap();
     let mut offset_of_2k_block = 0;
@@ -249,6 +251,7 @@ pub fn unpack(src_path: PathBuf, dst_path: PathBuf) {
         for info in &entry_info_list {
             match info {
                 EntryInfo::Divider(info) => {
+                    writer.write_all(&[0, 0, 0, 0]).unwrap();
                     writer.write_all(&info.name).unwrap();
                     writer.write_all(&info.divider_unknown_field).unwrap();
                 }
