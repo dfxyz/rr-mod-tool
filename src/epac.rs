@@ -185,34 +185,50 @@ pub fn unpack(src_path: PathBuf, dst_path: PathBuf) {
     let footer_unknown_field = u8::from_le_bytes(buf);
 
     reader.seek(SeekFrom::Start(0x800)).unwrap();
+    let mut offset_of_2k_block = 0;
     let mut entry_info_list = vec![];
     loop {
-        let buf = read_exact!(&mut reader, 4);
+        let buf = read_exact!(&mut reader, 12);
         if &buf[..4] == [0, 0, 0, 0] {
             break;
         }
-        if buf[0] == b'E' {
-            let name = buf;
-            let divider_unknown_field = read_exact!(&mut reader, 4);
-            reader.seek(SeekFrom::Current(4)).unwrap();
+
+        let mut maybe_offset = [0u8; 4];
+        maybe_offset.clone_from_slice(&buf[4..8]);
+        let maybe_offset = u32::from_le_bytes(maybe_offset);
+        if maybe_offset != offset_of_2k_block {
+            let mut name = [0u8; 4];
+            name.clone_from_slice(&buf[..4]);
+
+            let mut divider_unknown_field = [0u8; 4];
+            divider_unknown_field.clone_from_slice(&buf[4..8]);
+
             entry_info_list.push(EntryInfo::Divider(DividerInfo {
                 name,
                 divider_unknown_field,
             }));
         } else {
-            let file_no = buf;
+            let mut file_no = [0u8; 4];
+            file_no.clone_from_slice(&buf[..4]);
 
-            let buf = read_exact!(&mut reader, 4);
-            let offset = u32::from_le_bytes(buf) * 2048 + 0x4000;
+            let offset = maybe_offset;
+            let abs_offset = offset * 2048 + 0x4000;
 
-            let buf = read_exact!(&mut reader, 4);
-            let len = u32::from_le_bytes(buf) * 256;
+            let mut len = [0u8; 4];
+            len.clone_from_slice(&buf[8..]);
+            let len = u32::from_le_bytes(len);
+            let abs_len = len * 256;
 
             entry_info_list.push(EntryInfo::PackedFile(PackedFileInfo {
                 filename: String::from_utf8_lossy(&file_no).to_string(),
-                offset: offset as _,
-                len: len as _,
+                offset: abs_offset as _,
+                len: abs_len as _,
             }));
+
+            offset_of_2k_block += abs_len / 2048;
+            if abs_len % 2048 != 0 {
+                offset_of_2k_block += 1;
+            }
         }
     }
 
