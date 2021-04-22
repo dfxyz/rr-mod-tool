@@ -1,11 +1,10 @@
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fs::{create_dir_all, File};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use crate::{
-    create_file_to_write, read_exact, unpack_files, write_padding_zeroes, FileInfo, PackedFileInfo,
-};
+use crate::{create_file_to_write, read_exact, write_padding_zeroes, FileInfo, PackedFileInfo};
 
 // EPAC (align=0x800)
 // header: len=0x4000
@@ -53,6 +52,7 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
         let len = buf.len() / 4;
         assert_eq!(buf.len() % 4, 0);
 
+        let mut sn_map: HashMap<String, u32> = HashMap::new(); // to handle multiple file of same name
         let mut i = 0;
         while i < len {
             let start = i * 4;
@@ -61,7 +61,7 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
             name.clone_from_slice(&buf[start..end]);
             if &name[..] == [0, 0, 0, 0] {
                 assert!(i + 2 < len);
-                let mut divider_name = [0u8;4];
+                let mut divider_name = [0u8; 4];
                 divider_name.clone_from_slice(&buf[((i + 1) * 4)..((i + 2) * 4)]);
                 let mut divider_unknown_field = [0u8; 4];
                 divider_unknown_field.clone_from_slice(&buf[((i + 2) * 4)..((i + 3) * 4)]);
@@ -71,9 +71,19 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
                 }));
                 i += 3;
             } else {
-                let name = String::from_utf8_lossy(&name).to_string();
-                let path = src_path.join(name);
-                let len = File::open(&path).unwrap().metadata().unwrap().len();
+                let raw_name = String::from_utf8_lossy(&name).to_string();
+                let name = raw_name.trim();
+                let path = match sn_map.get_mut(name) {
+                    None => {
+                        sn_map.insert(name.to_string(), 0);
+                        src_path.join(&name)
+                    }
+                    Some(value) => {
+                        *value += 1;
+                        src_path.join(format!("{}.{}", name, value))
+                    }
+                };
+                let len = File::open(path).unwrap().metadata().unwrap().len();
                 let padding_zero_num = {
                     let rem = len % ALIGN_SIZE as u64;
                     if rem == 0 {
@@ -83,7 +93,7 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
                     }
                 };
                 entry_info_list.push(EntryInfo::File(FileInfo {
-                    path,
+                    path: PathBuf::from(raw_name), // will be fixed after writing entry info
                     len,
                     padding_zero_num,
                 }));
@@ -115,8 +125,9 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
     write_padding_zeroes(&mut writer, 0x800 - 16);
 
     // write entry info
+    let mut sn_map: HashMap<String, u32> = HashMap::new(); // to handle multiple file of same name
     let mut offset_of_2k_block = 0u32;
-    for info in &entry_info_list {
+    for info in &mut entry_info_list {
         match info {
             EntryInfo::Divider(info) => {
                 writer.write_all(&info.name).unwrap();
@@ -125,9 +136,22 @@ pub fn pack(src_path: PathBuf, dst_path: PathBuf) {
                 writer.write_all(&offset.to_le_bytes()).unwrap();
             }
             EntryInfo::File(info) => {
-                let filename = info.path.file_name().unwrap().to_string_lossy();
-                let filename = filename.as_bytes();
-                writer.write_all(filename).unwrap();
+                let raw_name = info.path.to_string_lossy();
+                let raw_name_bytes = raw_name.as_bytes();
+                writer.write_all(raw_name_bytes).unwrap();
+
+                let filename = raw_name.trim().to_string();
+                info.path = match sn_map.get_mut(&filename) {
+                    None => {
+                        sn_map.insert(filename.clone(), 0);
+                        src_path.join(filename)
+                    }
+                    Some(value) => {
+                        *value += 1;
+                        src_path.join(format!("{}.{}", filename, value))
+                    }
+                };
+
                 let offset = offset_of_2k_block;
                 writer.write_all(&offset.to_le_bytes()).unwrap();
 
@@ -266,10 +290,31 @@ pub fn unpack(src_path: PathBuf, dst_path: PathBuf) {
     }
 
     // extract files
+    let mut sn_map: HashMap<String, u32> = HashMap::new(); // to handle multiple file of same name
     for info in entry_info_list {
         if let EntryInfo::PackedFile(info) = info {
-            let vec = vec![info];
-            unpack_files(&mut reader, &vec, &dst_path);
+            reader.seek(SeekFrom::Start(info.offset as u64)).unwrap();
+
+            // name may contain spaces (0x20)
+            let filename = info.filename.trim();
+            let output_path = match sn_map.get_mut(filename) {
+                None => {
+                    sn_map.insert(filename.to_string(), 0);
+                    dst_path.join(filename)
+                }
+                Some(value) => {
+                    *value += 1;
+                    dst_path.join(format!("{}.{}", filename, value))
+                }
+            };
+
+            let file = create_file_to_write(output_path);
+            let mut writer = BufWriter::new(file);
+
+            let mut vec = Vec::with_capacity(info.len as _);
+            unsafe { vec.set_len(info.len as _) };
+            reader.read_exact(&mut vec).unwrap();
+            writer.write_all(&vec).unwrap();
         }
     }
 }
