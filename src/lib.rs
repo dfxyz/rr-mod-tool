@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 pub mod bpe;
 pub mod epac;
@@ -69,7 +70,16 @@ fn list_files(
             padding_zero_num,
         });
     }
-    vec.sort_by(|i1, i2| i1.path.cmp(&i2.path));
+    // Sort files numerically
+    vec.sort_by(|i1, i2| {
+        let name1 = i1.path.file_name().unwrap().to_string_lossy();
+        let name2 = i2.path.file_name().unwrap().to_string_lossy();
+
+        let num1 = u32::from_str(&name1).unwrap_or_default();
+        let num2 = u32::from_str(&name2).unwrap_or_default();
+
+        num1.cmp(&num2)
+    });
     vec
 }
 
